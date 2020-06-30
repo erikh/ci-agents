@@ -60,6 +60,9 @@ class User {
             if (data.hasOwnProperty('last_scanned_repos')) {
                 obj['last_scanned_repos'] = ApiClient.convertToType(data['last_scanned_repos'], 'Date');
             }
+            if (data.hasOwnProperty('user_type')) {
+                obj['user_type'] = ApiClient.convertToType(data['user_type'], 'Number');
+            }
             if (data.hasOwnProperty('errors')) {
                 obj['errors'] = ApiClient.convertToType(data['errors'], [UserError]);
             }
@@ -89,6 +92,11 @@ User.prototype['token'] = undefined;
  * @member {Date} last_scanned_repos
  */
 User.prototype['last_scanned_repos'] = undefined;
+
+/**
+ * @member {Number} user_type
+ */
+User.prototype['user_type'] = undefined;
 
 /**
  * @member {Array.<module:model/UserError>} errors

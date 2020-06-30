@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 **username** | **String** |  | [optional] 
 **token** | **Object** |  | [optional] 
 **lastScannedRepos** | **Date** |  | [optional] 
+**userType** | **Number** |  | [optional] 
 **errors** | [**[UserError]**](UserError.md) |  | [optional] 
 
 

@@ -1009,6 +1009,9 @@ type RunTaskSubmissionUser struct {
 	// token
 	Token interface{} `json:"token,omitempty"`
 
+	// user type
+	UserType int64 `json:"user_type,omitempty"`
+
 	// username
 	Username string `json:"username,omitempty"`
 }

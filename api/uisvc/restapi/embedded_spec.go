@@ -2935,6 +2935,9 @@ func init() {
               "type": "object",
               "additionalProperties": true
             },
+            "user_type": {
+              "type": "integer"
+            },
             "username": {
               "type": "string"
             }
@@ -3086,6 +3089,9 @@ func init() {
               "token": {
                 "type": "object",
                 "additionalProperties": true
+              },
+              "user_type": {
+                "type": "integer"
               },
               "username": {
                 "type": "string"
@@ -3438,6 +3444,9 @@ func init() {
                       "type": "object",
                       "additionalProperties": true
                     },
+                    "user_type": {
+                      "type": "integer"
+                    },
                     "username": {
                       "type": "string"
                     }
@@ -3767,6 +3776,9 @@ func init() {
                         "type": "object",
                         "additionalProperties": true
                       },
+                      "user_type": {
+                        "type": "integer"
+                      },
                       "username": {
                         "type": "string"
                       }
@@ -4037,6 +4049,9 @@ func init() {
                   "token": {
                     "type": "object",
                     "additionalProperties": true
+                  },
+                  "user_type": {
+                    "type": "integer"
                   },
                   "username": {
                     "type": "string"

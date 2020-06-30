@@ -78,6 +78,12 @@
       //expect(instance).to.be();
     });
 
+    it('should have the property userType (base name: "user_type")', function() {
+      // uncomment below and update the code to test the property userType
+      //var instane = new Uisvc.User();
+      //expect(instance).to.be();
+    });
+
     it('should have the property errors (base name: "errors")', function() {
       // uncomment below and update the code to test the property errors
       //var instane = new Uisvc.User();
