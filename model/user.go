@@ -13,6 +13,19 @@ import (
 	topTypes "github.com/tinyci/ci-agents/types"
 )
 
+// ErrNoAnonymous is returned when an anonymous user tries to do something that hits the db.
+var ErrNoAnonymous = errors.New("anonymous users may not work with this resource").(errors.Error)
+
+// UserType is the type of user we are working with
+type UserType types.UserType
+
+const (
+	// UserTypeDB is a user that is populated from the DB
+	UserTypeDB UserType = UserType(types.UserType_DB)
+	// UserTypeAnonymous is an anonymous user, that is not kept in the DB.
+	UserTypeAnonymous UserType = UserType(types.UserType_Anonymous)
+)
+
 // Capability is a type of access gating mechanism. If present on the user
 // account access is granted, otherwise not.
 type Capability string
@@ -74,10 +87,20 @@ type User struct {
 
 	TokenJSON []byte               `gorm:"column:token;not null" json:"-"`
 	Token     *topTypes.OAuthToken `json:"-"`
+
+	Type UserType `gorm:"not null" json:"user_type"`
+}
+
+// IsAnonymous returns true if the user is an anonymous user.
+func (u *User) IsAnonymous() bool {
+	return u.Type == UserTypeAnonymous
 }
 
 // SetToken sets the token's byte stream, and encrypts it.
 func (u *User) SetToken() error {
+	if u.IsAnonymous() {
+		return ErrNoAnonymous.Wrap("Setting token")
+	}
 	var err error
 	u.TokenJSON, err = topTypes.EncryptToken(TokenCryptKey, u.Token)
 	return err
@@ -85,6 +108,10 @@ func (u *User) SetToken() error {
 
 // FetchToken retrieves the token from the db, decrypting it if necessary.
 func (u *User) FetchToken() error {
+	if u.IsAnonymous() {
+		return ErrNoAnonymous.Wrap("Retrieving token")
+	}
+
 	if u.Token != nil {
 		return nil
 	}
@@ -106,7 +133,7 @@ func NewUserFromProto(u *types.User) (*User, error) {
 
 	token := &topTypes.OAuthToken{}
 
-	if u.TokenJSON != nil {
+	if u.UserType != types.UserType_Anonymous && u.TokenJSON != nil {
 		if err := json.Unmarshal(u.TokenJSON, token); err != nil {
 			return nil, errors.New(err)
 		}
@@ -154,7 +181,7 @@ func (u *User) ToProto() *types.User {
 		errors = append(errors, e.ToProto())
 	}
 
-	if u.Token != nil {
+	if !u.IsAnonymous() && u.Token != nil {
 		u.TokenJSON, _ = json.Marshal(u.Token)
 	}
 
@@ -196,17 +223,29 @@ func (m *Model) FindUserByNameWithSubscriptions(username, search string) (*User,
 
 // DeleteError deletes a given error for a user.
 func (m *Model) DeleteError(u *User, id int64) error {
+	if u.IsAnonymous() {
+		return ErrNoAnonymous.Wrap("deleting errors for user")
+	}
+
 	return m.WrapError(m.Where("id = ?", id).Delete(u.Errors), "deleting errors for user")
 }
 
 // AddSubscriptionsForUser adds the repositories to the subscriptions table. Access is
 // validated at the API level, not here.
 func (m *Model) AddSubscriptionsForUser(u *User, repos []*Repository) error {
+	if u.IsAnonymous() {
+		return ErrNoAnonymous.Wrap("adding subscriptions for user")
+	}
+
 	return errors.New(m.Model(u).Association("Subscribed").Append(repos).Error)
 }
 
 // RemoveSubscriptionForUser removes an item from the subscriptions table.
 func (m *Model) RemoveSubscriptionForUser(u *User, repo *Repository) error {
+	if u.IsAnonymous() {
+		return ErrNoAnonymous.Wrap("removing subscriptions for user")
+	}
+
 	return errors.New(m.Model(u).Association("Subscribed").Delete(repo).Error)
 }
 
@@ -217,8 +256,10 @@ func (u *User) AddError(err error) {
 
 // AfterFind is a gorm hook to unmarshal the Token JSON after finding the record.
 func (u *User) AfterFind(tx *gorm.DB) error {
-	if err := u.FetchToken(); err != nil {
-		return err
+	if !u.IsAnonymous() {
+		if err := u.FetchToken(); err != nil {
+			return err
+		}
 	}
 
 	if err := u.Validate(); err != nil {
@@ -239,8 +280,10 @@ func (u *User) BeforeSave(tx *gorm.DB) error {
 		return errors.New(err).(errors.Error).Wrapf("saving user %q", u.Username)
 	}
 
-	if err := u.SetToken(); err != nil {
-		return err
+	if !u.IsAnonymous() {
+		if err := u.SetToken(); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -248,8 +291,10 @@ func (u *User) BeforeSave(tx *gorm.DB) error {
 
 // ValidateWrite is for write-only validations.
 func (u *User) ValidateWrite() error {
-	if u.Token == nil || u.Token.Token == "" {
-		return errors.New("cannot be written because the oauth credentials are not valid")
+	if !u.IsAnonymous() {
+		if u.Token == nil || u.Token.Token == "" {
+			return errors.New("cannot be written because the oauth credentials are not valid")
+		}
 	}
 
 	return u.Validate()
@@ -257,8 +302,10 @@ func (u *User) ValidateWrite() error {
 
 // Validate validates the user record to ensure it can be written.
 func (u *User) Validate() error {
-	if u.Username == "" {
-		return errors.New("username is empty")
+	if !u.IsAnonymous() {
+		if u.Username == "" {
+			return errors.New("username is empty")
+		}
 	}
 
 	return nil
@@ -314,16 +361,26 @@ func (m *Model) ListSubscribedTasksForUser(userID, page, perPage int64) ([]*Task
 
 // AddCapabilityToUser adds a capability to a user account.
 func (m *Model) AddCapabilityToUser(u *User, cap Capability) error {
+	if u.IsAnonymous() {
+		return ErrNoAnonymous.Wrap("Cannot add capabilities to user")
+	}
 	return m.WrapError(m.Exec("insert into user_capabilities (user_id, name) values (?, ?)", u.ID, cap), "adding capability for user")
 }
 
 // RemoveCapabilityFromUser removes a capability from a user account.
 func (m *Model) RemoveCapabilityFromUser(u *User, cap Capability) error {
+	if u.IsAnonymous() {
+		return ErrNoAnonymous.Wrap("Cannot remove capabilities from user")
+	}
 	return m.WrapError(m.Exec("delete from user_capabilities where user_id = ? and name = ?", u.ID, cap), "removing capability from user")
 }
 
 // GetCapabilities returns the capabilities the supplied user account has.
 func (m *Model) GetCapabilities(u *User, fixedCaps map[string][]string) ([]Capability, error) {
+	if u.IsAnonymous() {
+		return []Capability{}, nil
+	}
+
 	caps := map[string]struct{}{}
 
 	if fc, ok := fixedCaps[u.Username]; ok {
@@ -355,6 +412,10 @@ func (m *Model) GetCapabilities(u *User, fixedCaps map[string][]string) ([]Capab
 
 // HasCapability returns true if the user is capable of performing the operation.
 func (m *Model) HasCapability(u *User, cap Capability, fixedCaps map[string][]string) (bool, error) {
+	if u.IsAnonymous() {
+		return false, nil
+	}
+
 	// if we have fixed caps, we consult that table only; these are overrides for
 	// users that exist within the configuration file for the datasvc.
 	if caps, ok := fixedCaps[u.Username]; ok {

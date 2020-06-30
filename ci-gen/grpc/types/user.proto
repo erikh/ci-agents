@@ -6,6 +6,11 @@ option go_package = "github.com/tinyci/ci-agents/ci-gen/grpc/types";
 
 import "google/protobuf/timestamp.proto";
 
+enum UserType {
+  DB        = 0;
+  Anonymous = 1;
+}
+
 // User is ... a user record
 message User {
             int64                     id                = 1; // ID of user
@@ -16,6 +21,7 @@ message User {
             // up; this contains an access and refresh token. Encrypted with the token
             // key.
             bytes                     tokenJSON         = 5;
+            UserType                  userType          = 6;
 }
 
 // UserError is the pre-converted UserError record. It is later converted to a types.Error.

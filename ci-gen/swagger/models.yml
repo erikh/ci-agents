@@ -27,6 +27,8 @@ definitions:
         type: string 
         format: date-time
         x-nullable: true
+      user_type:
+        type: integer
       errors:
         type: array
         items:
