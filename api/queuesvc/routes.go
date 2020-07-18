@@ -138,8 +138,9 @@ func (qs *QueueServer) Submit(ctx context.Context, sub *queue.Submission) (*empt
 	// XXX this allows the cancel function to be inept while still not leaking
 	go func() { time.Sleep(5 * time.Minute); cancel() }()
 
-	sp := qs.newSubmissionProcessor()
-	qis, err := sp.process(processCtx, submission)
+	sp := qs.newSubmissionProcessor(submission)
+	defer sp.cleanup()
+	qis, err := sp.process(processCtx)
 	if err != nil {
 		submissionLogger.Errorf(ctx, "Post-processing error: %v", err)
 		return &empty.Empty{}, err.ToGRPC(codes.FailedPrecondition)

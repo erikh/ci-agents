@@ -3,16 +3,24 @@ package queuesvc
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 
-	gh "github.com/google/go-github/github"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/transport/http"
+	"github.com/google/go-github/github"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/handler"
-	"github.com/tinyci/ci-agents/clients/github"
+	gh "github.com/tinyci/ci-agents/clients/github"
 	"github.com/tinyci/ci-agents/clients/log"
 	"github.com/tinyci/ci-agents/errors"
 	"github.com/tinyci/ci-agents/model"
 	"github.com/tinyci/ci-agents/types"
-	"github.com/tinyci/ci-agents/utils"
 )
 
 const (
@@ -21,23 +29,33 @@ const (
 	taskConfigFilename = "task.yml"
 )
 
-// small cache of repository information we need
-type repoInfo struct {
-	ghParent   *gh.Repository
-	ghFork     *gh.Repository
-	parent     *model.Repository
-	fork       *model.Repository
-	parentRef  *model.Ref
-	forkRef    *model.Ref
-	user       *model.User
-	repoConfig *types.RepoConfig
-	ticketID   int64
+type queueItems []*model.QueueItem
+
+func (qi queueItems) Swap(i, j int) {
+	qi[i], qi[j] = qi[j], qi[i]
+}
+
+func (qi queueItems) Less(i, j int) bool {
+	return qi[i].Run.Name < qi[j].Run.Name
+}
+
+func (qi queueItems) Len() int {
+	return len(qi)
 }
 
 type submissionProcessor struct {
-	handler  *handler.H
-	logger   *log.SubLogger
-	repoInfo *repoInfo
+	handler    *handler.H
+	logger     *log.SubLogger
+	submission *types.Submission
+
+	parent *model.Repository
+	fork   *model.Repository
+
+	ghClient gh.Client
+
+	repoConfig *types.RepoConfig
+
+	root string
 }
 
 func getLogger(sub *types.Submission, h *handler.H) *log.SubLogger {
@@ -55,267 +73,420 @@ func getLogger(sub *types.Submission, h *handler.H) *log.SubLogger {
 	return h.Clients.Log
 }
 
-func (qs *QueueServer) newSubmissionProcessor() *submissionProcessor {
-	return &submissionProcessor{repoInfo: &repoInfo{}, handler: qs.H}
+func (qs *QueueServer) newSubmissionProcessor(sub *types.Submission) *submissionProcessor {
+	return &submissionProcessor{handler: qs.H, logger: getLogger(sub, qs.H), submission: sub}
 }
 
-func (sp *submissionProcessor) process(ctx context.Context, sub *types.Submission) ([]*model.QueueItem, *errors.Error) {
-	sp.logger = getLogger(sub, sp.handler)
-	if err := sp.configureRepositories(ctx, sub); err != nil {
-		return nil, err.Wrap("configuring repositories for submission")
+func (sp *submissionProcessor) cleanup() *errors.Error {
+	if sp.root != "" {
+		return errors.New(os.RemoveAll(sp.root))
 	}
 
-	client, err := sp.repoInfo.client(sp.handler)
-	if err != nil {
-		return nil, err.Wrap("fetching client for parent repository")
-	}
-
-	sp.repoInfo.repoConfig, err = sp.getRepoConfig(ctx, client)
-	if err != nil {
-		return nil, err.Wrap("obtaining repository configuration")
-	}
-
-	tp := sp.newTaskPicker()
-
-	return tp.pick(ctx, sub, sp.repoInfo)
-}
-
-func (sp *submissionProcessor) configureRepositories(ctx context.Context, sub *types.Submission) *errors.Error {
-	if err := sub.Validate(); err != nil {
-		return err.Wrap("validating submission")
-	}
-
-	// manual submissions must be resolvable by the submitter to avoid security
-	// leaks, so this uses the user's account to look up the parent info and
-	// returns it so that it can be added to the submission data.
-	if sub.Manual {
-		user, userClient, err := sp.getSubmittedUserClient(ctx, sub.SubmittedBy)
-		if err != nil {
-			return err.Wrap("getting submitting user account info")
-		}
-
-		repo, err := userClient.GetRepository(ctx, sub.Fork)
-		if err != nil {
-			return err.Wrap("obtaining fork repository for submission -- probably no access")
-		}
-
-		sub.Parent, err = sp.selectParentOrFork(ctx, userClient, repo)
-		if err != nil {
-			return err.Wrap("while deriving parent information from fork")
-		}
-
-		sp.repoInfo.user = user
-	}
-
-	parent, err := sp.parentRepository(ctx, sub.Parent)
-	if err != nil {
-		return err.Wrap("obtaining parent repository")
-	}
-
-	client, err := sp.repoInfo.client(sp.handler)
-	if err != nil {
-		return err.Wrap("obtaining github client for parent repo owner")
-	}
-
-	if parent.Disabled {
-		return errors.New("repository is not enabled")
-	}
-
-	sp.repoInfo.ghParent, err = client.GetRepository(ctx, parent.Name)
-	if err != nil {
-		return err.Wrap("checking access to parent repository on github")
-	}
-
-	fork, err := sp.makeFork(ctx, client, parent, sub.Fork)
-	if err != nil {
-		return err.Wrap("locating or creating fork record")
-	}
-
-	sp.repoInfo.ticketID = sub.TicketID
-
-	if len(sub.HeadSHA) != 40 { // FIXME could be trumped with long branch names
-		sub.HeadSHA, err = client.GetSHA(ctx, sub.Fork, sub.HeadSHA)
-		if err != nil {
-			return err.Wrap("while obtaining the HEAD SHA for the head repo/branch")
-		}
-	}
-
-	sub.BaseSHA, err = client.GetSHA(ctx, sub.Parent, sp.repoInfo.mainBranch())
-	if err != nil {
-		return err.Wrap("while selecting HEAD SHA for base repo/branch")
-	}
-
-	if sub.BaseSHA == "0000000000000000000000000000000000000000" {
-		if sub.Fork == sub.Parent {
-			// new branch; set to head ref
-			sub.BaseSHA = sub.HeadSHA
-		} else {
-			return errors.New("base SHA was blank but this was not a new branch")
-		}
-	}
-
-	sp.repoInfo.forkRef, err = sp.manageRefs(ctx, client, fork, sub.HeadSHA)
-	if err != nil {
-		return err
-	}
-
-	sp.repoInfo.parentRef, err = sp.manageRefs(ctx, client, parent, sub.BaseSHA)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
-func (sp *submissionProcessor) manageRefs(ctx context.Context, client github.Client, repo *model.Repository, sha string) (*model.Ref, *errors.Error) {
-	refs, err := client.GetRefs(ctx, repo.Name, sha)
-	if err != nil {
+func (sp *submissionProcessor) process(ctx context.Context) ([]*model.QueueItem, *errors.Error) {
+	if err := sp.submission.Validate(); err != nil {
 		return nil, err
 	}
 
-	var refName string
+	var eErr error
 
-	if len(refs) > 0 {
-		sort.Strings(refs)
-		refName = refs[0]
+	sp.root, eErr = ioutil.TempDir("", "")
+	if eErr != nil {
+		return nil, errors.New(eErr).Wrap("while creating directory for git clone")
+	}
+
+	var err *errors.Error
+
+	if sp.submission.Manual {
+		user, err := sp.handler.Clients.Data.GetUser(ctx, sp.submission.SubmittedBy)
+		if err != nil {
+			return nil, err.Wrap("could not find user account")
+		}
+
+		sp.ghClient = sp.handler.OAuth.GithubClient(user.Token)
 	} else {
-		refName = sha
+		sp.parent, err = sp.handler.Clients.Data.GetRepository(ctx, sp.submission.Parent)
+		if err != nil {
+			return nil, err.Wrap("while retrieving parent repository")
+		}
+
+		sp.ghClient = sp.handler.OAuth.GithubClient(sp.parent.Owner.Token)
 	}
 
-	if _, _, err := repo.OwnerRepo(); err != nil {
+forkRetry:
+	sp.fork, err = sp.handler.Clients.Data.GetRepository(ctx, sp.submission.Fork)
+	if err != nil {
+		if err.Contains(errors.ErrNotFound) {
+			ghFork, err := sp.ghClient.GetRepository(ctx, sp.submission.Fork)
+			if err != nil {
+				return nil, err.Wrap("while trying to fetch the fork to add")
+			}
+
+			if err := sp.handler.Clients.Data.PutRepositories(ctx, sp.submission.Fork, []*github.Repository{ghFork}, true); err != nil {
+				return nil, err.Wrap("auto-creating fork repository")
+			}
+
+			goto forkRetry
+		} else {
+			return nil, err.Wrap("while retrieving fork repository")
+		}
+	}
+
+	if sp.submission.Manual {
+		sp.submission.BaseSHA = sp.submission.HeadSHA
+		sp.parent = sp.fork
+	}
+
+	repo, eErr := git.PlainCloneContext(ctx, sp.root, false, &git.CloneOptions{
+		URL: sp.parent.Github.GetCloneURL(),
+		Auth: &http.BasicAuth{
+			Username: "x", // anything except an empty string
+			Password: sp.parent.Owner.Token.Token,
+		},
+		RecurseSubmodules: 5, // FIXME make this configurable
+	})
+	if eErr != nil {
+		return nil, errors.New(eErr)
+	}
+
+	forkRemote, eErr := repo.CreateRemote(&config.RemoteConfig{
+		Name: "fork",
+		URLs: []string{sp.fork.Github.GetCloneURL()},
+	})
+
+	if eErr != nil {
+		return nil, errors.New(eErr)
+	}
+
+	eErr = forkRemote.FetchContext(ctx, &git.FetchOptions{
+		Auth: &http.BasicAuth{
+			Username: "x", // anything except an empty string
+			Password: sp.parent.Owner.Token.Token,
+		},
+	})
+	if eErr != nil {
+		return nil, errors.New(eErr)
+	}
+
+	baseref, eErr := repo.Reference(plumbing.ReferenceName("refs/"+sp.submission.BaseSHA), false)
+	if eErr != nil {
+		return nil, errors.New(eErr).Wrapf("locating base commit @ %q", sp.submission.BaseSHA)
+	}
+
+	baseObj, eErr := repo.CommitObject(baseref.Hash())
+	if eErr != nil {
+		return nil, errors.New(eErr).Wrapf("locating base commit obj @ %q", sp.submission.BaseSHA)
+	}
+
+	baseTree, eErr := repo.TreeObject(baseObj.TreeHash)
+	if eErr != nil {
+		return nil, errors.New(eErr).Wrapf("locating base ref tree @ %q", sp.submission.BaseSHA)
+	}
+
+	headref, eErr := repo.Reference(plumbing.ReferenceName("refs/"+sp.submission.HeadSHA), false)
+	if eErr != nil {
+		return nil, errors.New(eErr).Wrapf("locating head commit @ %q", sp.submission.HeadSHA)
+	}
+
+	headObj, eErr := repo.CommitObject(headref.Hash())
+	if eErr != nil {
+		return nil, errors.New(eErr).Wrapf("locating head commit obj @ %q", sp.submission.BaseSHA)
+	}
+
+	headTree, eErr := repo.TreeObject(headObj.TreeHash)
+	if eErr != nil {
+		return nil, errors.New(eErr).Wrapf("locating head ref tree @ %q", sp.submission.HeadSHA)
+	}
+
+	changes, eErr := headTree.DiffContext(ctx, baseTree)
+	if eErr != nil {
+		return nil, errors.New(eErr).Wrap("generating diff")
+	}
+
+	patch, eErr := changes.PatchContext(ctx)
+	if eErr != nil {
+		return nil, errors.New(eErr).Wrap("generating patch")
+	}
+
+	dirs := map[string]struct{}{}
+
+	for _, filePatch := range patch.FilePatches() {
+		to, from := filePatch.Files()
+		dirs[filepath.Dir(to.Path())] = struct{}{}
+		dirs[filepath.Dir(from.Path())] = struct{}{}
+	}
+
+	wt, eErr := repo.Worktree()
+	if eErr != nil {
+		return nil, errors.New(eErr)
+	}
+
+	if err := wt.Checkout(&git.CheckoutOptions{Hash: headObj.Hash}); err != nil {
+		return nil, errors.New(err)
+	}
+
+	taskymls := map[string]struct{}{}
+
+	eErr = filepath.Walk(sp.root, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// try to do this in a single iteration
+		if filepath.Base(p) == taskConfigFilename {
+			rel, err := filepath.Rel(wt.Filesystem.Root(), p)
+			if err != nil {
+				return err
+			}
+
+			if strings.HasPrefix(rel, "..") {
+				return errors.New("oh my how did you get here? please report a bug in this relative pathing issue")
+			}
+
+			taskymls[filepath.Dir(p)] = struct{}{}
+		}
+
+		return nil
+	})
+	if eErr != nil {
+		return nil, errors.New(eErr)
+	}
+
+	selected := map[string]struct{}{}
+
+	for dir := range dirs {
+		d := dir
+
+		// "." means the string is empty according to the docs
+		for d != "." {
+			if _, ok := taskymls[d]; ok {
+				selected[d] = struct{}{}
+				break
+			}
+			d = filepath.Dir(d)
+		}
+	}
+
+	if err := sp.getRepoConfig(); err != nil {
 		return nil, err
 	}
 
+	// FIXME do stuff with selected
+	subRecord, err := sp.makeSub(ctx)
+	if err != nil {
+		return nil, err.Wrap("while writing submission")
+	}
+
+	tasks, taskDirs, err := sp.makeTaskDirs(ctx, selected, subRecord)
+	if err != nil {
+		return nil, err.Wrap("while configuring tasks")
+	}
+
+	qis := queueItems{}
+
+	for _, dir := range taskDirs {
+		qi, err := sp.generateQueueItems(ctx, dir, tasks[dir])
+		if err != nil {
+			return nil, err
+		}
+
+		qis = append(qis, qi...)
+	}
+
+	sort.Sort(qis)
+	return qis, errors.New("unimplemented")
+}
+
+func (sp *submissionProcessor) manageRef(ctx context.Context, repo *model.Repository, sha string) (*model.Ref, *errors.Error) {
 	ref, err := sp.handler.Clients.Data.GetRefByNameAndSHA(ctx, repo.Name, sha)
 	if err != nil {
 		if err.Contains(errors.ErrNotFound) {
-			ref = &model.Ref{Repository: repo, RefName: refName, SHA: sha}
+			refs, err := sp.ghClient.GetRefs(ctx, repo.Name, sha)
+			if err != nil {
+				return nil, err.Wrap("while retrieving ref in submission")
+			}
 
+			var refName string
+
+			if len(refs) > 0 {
+				sort.Strings(refs)
+				refName = refs[0]
+			} else {
+				refName = sha
+			}
+
+			ref = &model.Ref{Repository: repo, RefName: refName, SHA: sha}
 			id, err := sp.handler.Clients.Data.PutRef(ctx, ref)
 			if err != nil {
-				return nil, err
+				return nil, err.Wrap("while adding new ref to collection")
 			}
 
 			ref.ID = id
-		} else {
-			return nil, err
+			return ref, nil
 		}
+
+		return nil, err
 	}
 
 	return ref, nil
 }
 
-func (sp *submissionProcessor) makeFork(ctx context.Context, client github.Client, parent *model.Repository, fork string) (*model.Repository, *errors.Error) {
-	var err *errors.Error
-	sp.repoInfo.ghFork, err = client.GetRepository(ctx, fork)
+func (sp *submissionProcessor) makeSub(ctx context.Context) (*model.Submission, *errors.Error) {
+	forkRef, err := sp.manageRef(ctx, sp.fork, sp.submission.HeadSHA)
 	if err != nil {
-		return nil, err.Wrap("obtaining fork information from github")
+		return nil, err.Wrap("while gathering fork ref")
 	}
 
-	if _, _, err := utils.OwnerRepo(sp.repoInfo.ghFork.GetFullName()); err != nil {
-		return nil, err.Wrap("validating name of fork repository")
+	var parentRef *model.Ref
+
+	if sp.submission.Manual {
+		parentRef = forkRef
+	} else {
+		var err *errors.Error
+		parentRef, err = sp.manageRef(ctx, sp.parent, sp.submission.BaseSHA)
+		if err != nil {
+			return nil, err.Wrap("while gathering parent ref")
+		}
 	}
 
-retry:
-	forkRepo, err := sp.forkRepository(ctx, sp.repoInfo.ghFork.GetFullName())
+	return sp.handler.Clients.Data.PutSubmission(ctx, &model.Submission{
+		TicketID: sp.submission.TicketID,
+		HeadRef:  forkRef,
+		BaseRef:  parentRef,
+	})
+}
+
+func (sp *submissionProcessor) getRepoConfig() *errors.Error {
+	content, eErr := ioutil.ReadFile(filepath.Join(sp.root, repoConfigFilename))
+	if eErr != nil {
+		return errors.New(eErr).Wrap("while reading tinyCI in-repository configuration")
+	}
+
+	rc, err := types.NewRepoConfig(content)
 	if err != nil {
-		if !err.Contains(errors.ErrNotFound) {
-			return nil, err
+		return err.Wrap("while parsing tinyCI in-repository configuration")
+	}
+
+	sp.repoConfig = rc
+	return nil
+}
+
+func (sp *submissionProcessor) makeTask(ctx context.Context, dir string, subRecord *model.Submission) (*model.Task, *errors.Error) {
+	content, eErr := ioutil.ReadFile(filepath.Join(sp.root, dir, taskConfigFilename))
+	if eErr != nil {
+		return nil, errors.New(eErr).Wrapf("while reading task configuration in dir %q", dir)
+	}
+
+	ts, err := types.NewTaskSettings(content, false, sp.repoConfig)
+	if err != nil {
+		if sp.submission.TicketID != 0 {
+			if cerr := sp.ghClient.CommentError(ctx, sp.parent.Name, sp.submission.TicketID, err.Wrap("tinyCI had an error processing your pull request")); cerr != nil {
+				return nil, cerr.Wrap("attempting to alert the user about the error in their pull request")
+			}
 		}
 
-		if err := sp.handler.Clients.Data.PutRepositories(ctx, parent.Owner.Username, []*gh.Repository{sp.repoInfo.ghFork}, true); err != nil {
-			return nil, err
+		return nil, err.Wrapf("validating task settings for repo %q sha %q dir %q", sp.fork.Name, sp.submission.HeadSHA, dir)
+	}
+
+	return &model.Task{
+		Path:         dir,
+		TaskSettings: ts,
+		CreatedAt:    time.Now(),
+		Submission:   subRecord,
+	}, nil
+}
+
+func (sp *submissionProcessor) makeTaskDirs(ctx context.Context, process map[string]struct{}, subRecord *model.Submission) (map[string]*model.Task, []string, *errors.Error) {
+	tasks := map[string]*model.Task{}
+
+	sp.logger.Info(ctx, "Computing task dirs")
+
+	taskdirs := []string{}
+	for dir := range process {
+		taskdirs = append(taskdirs, dir)
+	}
+
+	for i := 0; i < len(taskdirs); i++ {
+		task, err := sp.makeTask(ctx, taskdirs[i], subRecord)
+		if err != nil {
+			return nil, nil, err.Wrap("making task")
 		}
-		goto retry
+
+		tasks[taskdirs[i]] = task
+
+		for _, dir := range task.TaskSettings.Dependencies {
+			if _, ok := process[dir]; !ok {
+				process[dir] = struct{}{}
+				taskdirs = append(taskdirs, dir)
+			}
+		}
 	}
 
-	return forkRepo, nil
+	sort.Strings(taskdirs)
+
+	return tasks, taskdirs, nil
 }
 
-func (ri *repoInfo) client(h *handler.H) (github.Client, *errors.Error) {
-	repoOwner := ri.parent.Owner
-	if repoOwner == nil {
-		return nil, errors.New("No owner for target repository")
-	}
+func (sp *submissionProcessor) generateQueueItems(ctx context.Context, dir string, task *model.Task) (queueItems, *errors.Error) {
+	qis := queueItems{}
 
-	return h.OAuth.GithubClient(repoOwner.Token), nil
-}
-
-func (sp *submissionProcessor) getSubmittedUserClient(ctx context.Context, submittedBy string) (*model.User, github.Client, *errors.Error) {
-	if submittedBy == "" {
-		return nil, nil, errors.New("invalid submission -- no `submitted by` field supplied")
-	}
-
-	user, err := sp.handler.Clients.Data.GetUser(ctx, submittedBy)
+	task, err := sp.handler.Clients.Data.PutTask(ctx, task)
 	if err != nil {
-		return nil, nil, err.Wrap("obtaining user information for submitter")
+		return nil, err.Wrap("Could not insert task")
 	}
 
-	token := &types.OAuthToken{}
-	if err := utils.JSONIO(user.Token, token); err != nil {
-		return nil, nil, err.Wrap("Decoding token from user account")
+	names := []string{}
+
+	for name := range task.TaskSettings.Runs {
+		names = append(names, name)
 	}
 
-	client := sp.handler.OAuth.GithubClient(token)
+	sort.Strings(names)
 
-	return user, client, nil
+	for _, name := range names {
+		qi, err := sp.makeRunQueue(ctx, name, dir, task)
+		if err != nil {
+			return nil, err.Wrap("constructing queue item")
+		}
+		qis = append(qis, qi)
+	}
+
+	return qis, nil
 }
 
-func (sp *submissionProcessor) parentRepository(ctx context.Context, parent string) (*model.Repository, *errors.Error) {
-	var err *errors.Error
-	if sp.repoInfo.parent == nil {
-		sp.repoInfo.parent, err = sp.handler.Clients.Data.GetRepository(ctx, parent)
+func (sp *submissionProcessor) makeRunQueue(ctx context.Context, name, dir string, task *model.Task) (*model.QueueItem, *errors.Error) {
+	rs := task.TaskSettings.Runs[name]
+
+	dirStr := dir
+
+	if dir == "." || dir == "" {
+		dirStr = "*root*"
 	}
 
-	return sp.repoInfo.parent, err
+	run := &model.Run{
+		Name:        strings.Join([]string{dirStr, name}, ":"),
+		RunSettings: rs,
+		Task:        task,
+		CreatedAt:   time.Now(),
+	}
+
+	go sp.setPendingStatus(ctx, run)
+
+	return &model.QueueItem{
+		Run:       run,
+		QueueName: run.RunSettings.Queue,
+	}, nil
 }
 
-func (sp *submissionProcessor) forkRepository(ctx context.Context, fork string) (*model.Repository, *errors.Error) {
-	var err *errors.Error
-	if sp.repoInfo.fork == nil {
-		sp.repoInfo.fork, err = sp.handler.Clients.Data.GetRepository(ctx, fork)
+func (sp *submissionProcessor) setPendingStatus(ctx context.Context, run *model.Run) {
+	parts := strings.SplitN(sp.parent.Name, "/", 2)
+	if len(parts) != 2 {
+		sp.logger.Error(ctx, errors.Errorf("invalid repo name %q", sp.parent.Name))
 	}
 
-	return sp.repoInfo.fork, err
-}
-
-func (sp *submissionProcessor) selectParentOrFork(ctx context.Context, client github.Client, fork *gh.Repository) (string, *errors.Error) {
-	forkRepo, err := sp.forkRepository(ctx, fork.GetFullName())
-	// this is ok; if modelRepo is nil then it's disabled.
-	enabled := err == nil && !forkRepo.Disabled
-
-	ret := fork.GetFullName()
-
-	if !enabled && fork.GetFork() {
-		ret = fork.GetParent().GetFullName()
-		sp.logger.Info(ctx, "Selected parent of fork")
-	} else {
-		sp.logger.Info(ctx, "Selected fork; is directly enabled")
+	if err := sp.ghClient.PendingStatus(ctx, parts[0], parts[1], run.Name, sp.submission.HeadSHA, sp.handler.URL); err != nil {
+		sp.logger.Error(ctx, err.Wrap("could not set pending status"))
 	}
-
-	if _, _, err := utils.OwnerRepo(ret); err != nil {
-		return "", err.Wrap("validating structure of parent repo name")
-	}
-
-	return ret, nil
-}
-
-func (ri *repoInfo) mainBranch() string {
-	defaultBranch := ri.ghParent.GetDefaultBranch()
-
-	if defaultBranch == "" {
-		defaultBranch = defaultMainBranch
-	} else {
-		defaultBranch = "heads/" + defaultBranch
-	}
-
-	return defaultBranch
-}
-
-func (sp *submissionProcessor) getRepoConfig(ctx context.Context, client github.Client) (*types.RepoConfig, *errors.Error) {
-	content, err := client.GetFile(ctx, sp.repoInfo.parent.Name, fmt.Sprintf("refs/%s", sp.repoInfo.mainBranch()), repoConfigFilename)
-	if err != nil {
-		return nil, err
-	}
-
-	return types.NewRepoConfig(content)
 }
