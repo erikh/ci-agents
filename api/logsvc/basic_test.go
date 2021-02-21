@@ -50,7 +50,7 @@ func (ls *logsvcSuite) TestFields(c *check.C) {
 	l := log.New()
 	ctx := context.Background()
 
-	wf := l.WithFields(log.FieldMap{"test": "one", "test2": "two"})
+	wf := l.WithFields(log.Fields{"test": "one", "test2": "two"})
 
 	wf.Info(ctx, "test")
 	wf.Infof(ctx, "test %d", 2)
@@ -65,13 +65,13 @@ func (ls *logsvcSuite) TestFields(c *check.C) {
 		c.Assert(messages[1].Message, check.Equals, "test 2")
 
 		for i := 0; i < 2; i++ {
-			val, ok := messages[i].Fields.Fields["test"]
+			val, ok := messages[i].Fields["test"]
 			c.Assert(ok, check.Equals, true)
-			c.Assert(val.GetStringValue(), check.Equals, "one")
+			c.Assert(val, check.Equals, "one")
 
-			val, ok = messages[i].Fields.Fields["test2"]
+			val, ok = messages[i].Fields["test2"]
 			c.Assert(ok, check.Equals, true)
-			c.Assert(val.GetStringValue(), check.Equals, "two")
+			c.Assert(val, check.Equals, "two")
 		}
 	}
 }
@@ -95,9 +95,9 @@ func (ls *logsvcSuite) TestService(c *check.C) {
 		c.Assert(messages[1].Message, check.Equals, "test 2")
 
 		for i := 0; i < 2; i++ {
-			val, ok := messages[i].Fields.Fields["service"]
+			val, ok := messages[i].Fields["service"]
 			c.Assert(ok, check.Equals, true)
-			c.Assert(val.GetStringValue(), check.Equals, "test")
+			c.Assert(val, check.Equals, "test")
 		}
 	}
 }
@@ -131,17 +131,17 @@ func (ls *logsvcSuite) TestRequest(c *check.C) {
 		c.Assert(messages[1].Message, check.Equals, "test 2")
 
 		for i := 0; i < 2; i++ {
-			val, ok := messages[i].Fields.Fields["remote_addr"]
+			val, ok := messages[i].Fields["remote_addr"]
 			c.Assert(ok, check.Equals, true)
-			c.Assert(val.GetStringValue(), check.Equals, "127.0.0.1")
+			c.Assert(val, check.Equals, "127.0.0.1")
 
-			val, ok = messages[i].Fields.Fields["request_method"]
+			val, ok = messages[i].Fields["request_method"]
 			c.Assert(ok, check.Equals, true)
-			c.Assert(val.GetStringValue(), check.Equals, "GET")
+			c.Assert(val, check.Equals, "GET")
 
-			val, ok = messages[i].Fields.Fields["request_url"]
+			val, ok = messages[i].Fields["request_url"]
 			c.Assert(ok, check.Equals, true)
-			c.Assert(val.GetStringValue(), check.Equals, "http://dogfood.tinyci.org")
+			c.Assert(val, check.Equals, "http://dogfood.tinyci.org")
 		}
 	}
 
@@ -172,17 +172,17 @@ func (ls *logsvcSuite) TestRequest(c *check.C) {
 		c.Assert(messages[1].Message, check.Equals, "test 2")
 
 		for i := 0; i < 2; i++ {
-			val, ok := messages[i].Fields.Fields["remote_addr"]
+			val, ok := messages[i].Fields["remote_addr"]
 			c.Assert(ok, check.Equals, true)
-			c.Assert(val.GetStringValue(), check.Equals, "1.2.3.4")
+			c.Assert(val, check.Equals, "1.2.3.4")
 
-			val, ok = messages[i].Fields.Fields["request_method"]
+			val, ok = messages[i].Fields["request_method"]
 			c.Assert(ok, check.Equals, true)
-			c.Assert(val.GetStringValue(), check.Equals, "POST")
+			c.Assert(val, check.Equals, "POST")
 
-			val, ok = messages[i].Fields.Fields["request_url"]
+			val, ok = messages[i].Fields["request_url"]
 			c.Assert(ok, check.Equals, true)
-			c.Assert(val.GetStringValue(), check.Equals, "https://pensando.io")
+			c.Assert(val, check.Equals, "https://pensando.io")
 		}
 	}
 }
@@ -207,13 +207,13 @@ func (ls *logsvcSuite) TestUser(c *check.C) {
 		c.Assert(messages[1].Message, check.Equals, "test 2")
 
 		for i := 0; i < 2; i++ {
-			val, ok := messages[i].Fields.Fields["user_id"]
+			val, ok := messages[i].Fields["user_id"]
 			c.Assert(ok, check.Equals, true)
-			c.Assert(val.GetStringValue(), check.Equals, "1")
+			c.Assert(val, check.Equals, "1")
 
-			val, ok = messages[i].Fields.Fields["username"]
+			val, ok = messages[i].Fields["username"]
 			c.Assert(ok, check.Equals, true)
-			c.Assert(val.GetStringValue(), check.Equals, "erikh")
+			c.Assert(val, check.Equals, "erikh")
 		}
 	}
 }

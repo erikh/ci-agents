@@ -1,0 +1,39 @@
+// Code generated with goa v3.2.6, DO NOT EDIT.
+//
+// assetsvc protocol buffer definition
+//
+// Command:
+// $ goa gen github.com/tinyci/ci-agents/design
+
+syntax = "proto3";
+
+package assetsvc;
+
+option go_package = "assetsvcpb";
+
+// Asset routing and aggregation service
+service Assetsvc {
+	// PutLog implements putLog.
+	rpc PutLog (stream PutLogStreamingRequest) returns (PutLogResponse);
+	// GetLog implements getLog.
+	rpc GetLog (GetLogRequest) returns (stream GetLogResponse);
+}
+
+message PutLogStreamingRequest {
+	// Run identitfier
+	sint64 id = 1;
+	bytes chunk = 2;
+}
+
+message PutLogResponse {
+}
+
+message GetLogRequest {
+	// Run identitfier
+	sint64 id = 1;
+}
+
+message GetLogResponse {
+	bytes chunk = 1;
+	repeated string errors = 2;
+}

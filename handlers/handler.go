@@ -528,7 +528,7 @@ func (h *H) Session(ctx *gin.Context) sessions.Session {
 
 // LogError logs an HTTP error to the client.
 func (h *H) LogError(err error, ctx *gin.Context, code int) {
-	logger := h.Clients.Log.WithRequest(ctx.Request).WithFields(log.FieldMap{"code": fmt.Sprintf("%v", code)})
+	logger := h.Clients.Log.WithRequest(ctx.Request).WithFields(log.Fields{"code": fmt.Sprintf("%v", code)})
 	user, gitErr := h.GetGithub(ctx)
 	if gitErr == nil {
 		logger = logger.WithUser(user)
@@ -551,6 +551,6 @@ func (h *H) LogError(err error, ctx *gin.Context, code int) {
 	}
 
 	if doLog {
-		logger.WithFields(log.FieldMap{"params": string(content)}).Error(context.Background(), err)
+		logger.WithFields(log.Fields{"params": string(content)}).Error(context.Background(), err)
 	}
 }

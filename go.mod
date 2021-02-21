@@ -26,6 +26,7 @@ require (
 	github.com/google/uuid v1.2.0
 	github.com/gorilla/securecookie v1.1.1
 	github.com/gorilla/sessions v1.2.1
+	github.com/grpc-ecosystem/go-grpc-middleware v1.2.2
 	github.com/grpc-ecosystem/grpc-opentracing v0.0.0-20180507213350-8e809c8a8645
 	github.com/jinzhu/gorm v1.9.16
 	github.com/json-iterator/go v1.1.10 // indirect
@@ -43,14 +44,17 @@ require (
 	github.com/uber/jaeger-client-go v2.25.0+incompatible
 	github.com/ugorji/go v1.2.4 // indirect
 	github.com/urfave/cli/v2 v2.3.0
+	goa.design/goa/v3 v3.2.6
 	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad // indirect
-	golang.org/x/net v0.0.0-20210119194325-5f4716e94777
+	golang.org/x/mod v0.4.1 // indirect
+	golang.org/x/net v0.0.0-20210222171744-9060382bd457
 	golang.org/x/oauth2 v0.0.0-20210201163806-010130855d6c
-	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c
+	golang.org/x/sys v0.0.0-20210223095934-7937bea0104d
 	golang.org/x/term v0.0.0-20201210144234-2321bbc49cbf
+	golang.org/x/tools v0.1.0 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/genproto v0.0.0-20210207032614-bba0dbe2a9ea // indirect
+	google.golang.org/genproto v0.0.0-20210222212404-3e1e516060db // indirect
 	google.golang.org/grpc v1.35.0
 	google.golang.org/protobuf v1.25.0
 	gopkg.in/yaml.v2 v2.4.0

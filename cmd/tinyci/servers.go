@@ -1,21 +1,25 @@
 package main
 
 import (
-	"github.com/tinyci/ci-agents/api/assetsvc"
+	assetsvcapi "github.com/tinyci/ci-agents/api/assetsvc"
 	"github.com/tinyci/ci-agents/api/auth/github"
 	"github.com/tinyci/ci-agents/api/datasvc"
-	"github.com/tinyci/ci-agents/api/logsvc"
+	logsvcapi "github.com/tinyci/ci-agents/api/logsvc"
 	"github.com/tinyci/ci-agents/api/queuesvc"
 	repoGithub "github.com/tinyci/ci-agents/api/repository/github"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/handler"
-	"github.com/tinyci/ci-agents/ci-gen/grpc/services/asset"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/services/auth"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/services/data"
-	"github.com/tinyci/ci-agents/ci-gen/grpc/services/log"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/services/queue"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/services/repository"
 	"github.com/tinyci/ci-agents/cmdlib"
 	"github.com/tinyci/ci-agents/config"
+	"github.com/tinyci/ci-agents/gen/assetsvc"
+	assetsvcpb "github.com/tinyci/ci-agents/gen/grpc/assetsvc/pb"
+	assetsvcsvr "github.com/tinyci/ci-agents/gen/grpc/assetsvc/server"
+	logsvcpb "github.com/tinyci/ci-agents/gen/grpc/logsvc/pb"
+	logsvcsvr "github.com/tinyci/ci-agents/gen/grpc/logsvc/server"
+	"github.com/tinyci/ci-agents/gen/logsvc"
 	"google.golang.org/grpc"
 )
 
@@ -25,7 +29,7 @@ var servers = []*cmdlib.GRPCServer{
 		Description:    "Asset & Log management for tinyCI",
 		DefaultService: config.DefaultServices.Asset,
 		RegisterService: func(s *grpc.Server, h *handler.H) error {
-			asset.RegisterAssetServer(s, &assetsvc.AssetServer{H: h})
+			assetsvcpb.RegisterAssetsvcServer(s, assetsvcsvr.New(assetsvc.NewEndpoints(&assetsvcapi.AssetServer{H: h}), nil))
 			return nil
 		},
 	},
@@ -54,7 +58,8 @@ var servers = []*cmdlib.GRPCServer{
 		Description:    "Centralized logging for tinyCI",
 		DefaultService: config.DefaultServices.Log,
 		RegisterService: func(s *grpc.Server, h *handler.H) error {
-			log.RegisterLogServer(s, logsvc.New(nil))
+			svc := logsvcsvr.New(logsvc.NewEndpoints(logsvcapi.New(nil)), nil)
+			logsvcpb.RegisterLogsvcServer(s, svc)
 			return nil
 		},
 	},

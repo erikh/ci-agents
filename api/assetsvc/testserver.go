@@ -3,9 +3,11 @@ package assetsvc
 import (
 	transport "github.com/erikh/go-transport"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/handler"
-	"github.com/tinyci/ci-agents/ci-gen/grpc/services/asset"
 	"github.com/tinyci/ci-agents/config"
 	"github.com/tinyci/ci-agents/errors"
+	"github.com/tinyci/ci-agents/gen/assetsvc"
+	assetsvcpb "github.com/tinyci/ci-agents/gen/grpc/assetsvc/pb"
+	assetsvcsvr "github.com/tinyci/ci-agents/gen/grpc/assetsvc/server"
 	"google.golang.org/grpc"
 )
 
@@ -27,7 +29,7 @@ func MakeAssetServer() (*handler.H, chan struct{}, error) {
 	}
 
 	srv := grpc.NewServer()
-	asset.RegisterAssetServer(srv, &AssetServer{H: h})
+	assetsvcpb.RegisterAssetsvcServer(srv, assetsvcsvr.New(assetsvc.NewEndpoints(&AssetServer{H: h}), nil))
 
 	doneChan, err := h.Boot(t, srv, make(chan struct{}))
 	return h, doneChan, errors.New(err)

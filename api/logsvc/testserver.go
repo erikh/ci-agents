@@ -3,25 +3,27 @@ package logsvc
 import (
 	transport "github.com/erikh/go-transport"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/handler"
-	"github.com/tinyci/ci-agents/ci-gen/grpc/services/log"
 	client "github.com/tinyci/ci-agents/clients/log"
 	"github.com/tinyci/ci-agents/config"
 	"github.com/tinyci/ci-agents/errors"
+	logsvcpb "github.com/tinyci/ci-agents/gen/grpc/logsvc/pb"
+	logsvcsvr "github.com/tinyci/ci-agents/gen/grpc/logsvc/server"
+	"github.com/tinyci/ci-agents/gen/logsvc"
 	"google.golang.org/grpc"
 )
 
 // MakeLogServer makes a logsvc.
 func MakeLogServer() (*handler.H, chan struct{}, *LogJournal, error) {
-	journal := &LogJournal{Journal: map[string][]*log.LogMessage{}}
+	journal := &LogJournal{Journal: map[string][]*logsvc.PutPayload{}}
 
 	logDispatch := DispatchTable{
-		client.LevelDebug: func(wf Dispatcher, msg *log.LogMessage) {
+		client.LevelDebug: func(wf Dispatcher, msg *logsvc.PutPayload) {
 			journal.Append(client.LevelDebug, msg)
 		},
-		client.LevelError: func(wf Dispatcher, msg *log.LogMessage) {
+		client.LevelError: func(wf Dispatcher, msg *logsvc.PutPayload) {
 			journal.Append(client.LevelError, msg)
 		},
-		client.LevelInfo: func(wf Dispatcher, msg *log.LogMessage) {
+		client.LevelInfo: func(wf Dispatcher, msg *logsvc.PutPayload) {
 			journal.Append(client.LevelInfo, msg)
 		},
 	}
@@ -45,7 +47,9 @@ func MakeLogServer() (*handler.H, chan struct{}, *LogJournal, error) {
 	}
 
 	srv := grpc.NewServer()
-	log.RegisterLogServer(srv, New(logDispatch))
+	svc := logsvcsvr.New(logsvc.NewEndpoints(New(logDispatch)), nil)
+
+	logsvcpb.RegisterLogsvcServer(srv, svc)
 
 	doneChan, err := h.Boot(t, srv, make(chan struct{}))
 	return h, doneChan, journal, errors.New(err)

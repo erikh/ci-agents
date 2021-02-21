@@ -10,6 +10,7 @@ DOCKER_RUN=docker run \
 DOCKER_CONTAINER_DIR=-v ${PWD}:$(CONTAINER_DIR) \
 								-w $(CONTAINER_DIR)
 
+RUN_TEST ?=
 DEMO_DOCKER_IMAGE=tinyci-agents
 DEBUG_DOCKER_IMAGE=tinyci-agents-debug
 TEST_DOCKER_IMAGE=tinyci-agents-test
@@ -69,11 +70,12 @@ DEMO_DOCKER_RUN=\
 								--name $(DEMO_DOCKER_IMAGE) \
 								$(DEMO_DOCKER_IMAGE)
 
+
 test: build-image
-	$(TEST_DOCKER_RUN) make do-test
+	$(TEST_DOCKER_RUN) make do-test "RUN_TEST=${RUN_TEST}"
 
 do-test:
-	go test -timeout 30m -p 1 -race -v ./... -check.v # -p 1 is needed because of gorilla/sessions init routines
+	go test -timeout 30m -p 1 -race -v ./... -run "${RUN_TEST}" -check.v # -p 1 is needed because of gorilla/sessions init routines
 
 test-debug: build-debug-image
 	$(DEBUG_DOCKER_RUN) bash
@@ -175,3 +177,9 @@ jaeger:
 
 stop-jaeger:
 	docker rm -f jaegertracing
+
+goa: build-image
+	$(TEST_DOCKER_RUN) go run goa.design/goa/v3/cmd/goa gen github.com/tinyci/ci-agents/design
+
+goa-examples: build-image
+	$(TEST_DOCKER_RUN) go run goa.design/goa/v3/cmd/goa example github.com/tinyci/ci-agents/design

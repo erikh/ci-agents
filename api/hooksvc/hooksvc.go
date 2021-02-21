@@ -196,5 +196,5 @@ func (h *Handler) prGetRepo(obj interface{}) (*model.Repository, error) {
 }
 
 func (h *Handler) getLog(req *http.Request, reqUUID uuid.UUID) *log.SubLogger {
-	return h.logClient.WithRequest(req).WithFields(log.FieldMap{"request_uuid": reqUUID.String()})
+	return h.logClient.WithRequest(req).WithFields(log.Fields{"request_uuid": reqUUID.String()})
 }

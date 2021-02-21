@@ -42,7 +42,7 @@ type submissionProcessor struct {
 
 func getLogger(sub *types.Submission, h *handler.H) *log.SubLogger {
 	if sub != nil {
-		return h.Clients.Log.WithFields(log.FieldMap{
+		return h.Clients.Log.WithFields(log.Fields{
 			"parent":       sub.Parent,
 			"fork":         sub.Fork,
 			"head":         sub.HeadSHA,

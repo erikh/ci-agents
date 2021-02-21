@@ -31,7 +31,7 @@ func PostSubmissionIDCancel(h *handlers.H, ctx *gin.Context, processingHandler h
 			h.Clients.Log.Error(ctx.Request.Context(), errors.New(jsonErr).Wrap("encoding params for log message"))
 		}
 
-		logger := h.Clients.Log.WithRequest(ctx.Request).WithFields(log.FieldMap{
+		logger := h.Clients.Log.WithRequest(ctx.Request).WithFields(log.Fields{
 			"params":       string(content),
 			"request_uuid": u.String(),
 		})
@@ -44,7 +44,7 @@ func PostSubmissionIDCancel(h *handlers.H, ctx *gin.Context, processingHandler h
 		logger.Debug(ctx.Request.Context(), "incoming request")
 
 		defer func() {
-			logger.WithFields(log.FieldMap{
+			logger.WithFields(log.Fields{
 				"duration": time.Since(start).String(),
 			}).Debug(ctx.Request.Context(), "request completed")
 		}()

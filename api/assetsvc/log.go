@@ -1,6 +1,7 @@
 package assetsvc
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -10,11 +11,9 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/handler"
-	"github.com/tinyci/ci-agents/ci-gen/grpc/services/asset"
-	"github.com/tinyci/ci-agents/ci-gen/grpc/types"
 	"github.com/tinyci/ci-agents/errors"
+	"github.com/tinyci/ci-agents/gen/assetsvc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -36,24 +35,37 @@ func (as *AssetServer) getLogsRoot() string {
 	return p
 }
 
+func makeGRPCError(err error) error {
+	if err != nil {
+		var retErr *errors.Error
+		switch err := err.(type) {
+		case *errors.Error:
+			if err == nil {
+				return nil
+			}
+			retErr = err
+		default:
+			retErr = errors.New(err)
+		}
+		return retErr.ToGRPC(codes.FailedPrecondition)
+	}
+
+	return nil
+}
+
 // PutLog writes the log to disk
-func (as *AssetServer) PutLog(ap asset.Asset_PutLogServer) error {
-	return as.submit(ap, as.getLogsRoot())
+func (as *AssetServer) PutLog(ctx context.Context, ap assetsvc.PutLogServerStream) error {
+	defer ap.Close()
+	return makeGRPCError(as.submit(ap, as.getLogsRoot()))
 }
 
 // GetLog spills the log back to connecting websocket.
-func (as *AssetServer) GetLog(id *types.IntID, ag asset.Asset_GetLogServer) error {
-	return as.attach(id.ID, ag, as.getLogsRoot())
+func (as *AssetServer) GetLog(ctx context.Context, id *assetsvc.GetLogPayload, ag assetsvc.GetLogServerStream) error {
+	defer ag.Close()
+	return makeGRPCError(as.attach(id.ID, ag, as.getLogsRoot()))
 }
 
-func (as *AssetServer) submit(ap asset.Asset_PutLogServer, p string) (retErr *errors.Error) {
-	defer func() {
-		if retErr != nil {
-			md := metadata.New(nil)
-			md.Append("errors", retErr.ToGRPC(codes.FailedPrecondition).Error())
-			ap.SetTrailer(md)
-		}
-	}()
+func (as *AssetServer) submit(ap assetsvc.PutLogServerStream, p string) (retErr *errors.Error) {
 	if err := os.MkdirAll(p, 0700); err != nil {
 		return errors.New(err)
 	}
@@ -93,25 +105,21 @@ func (as *AssetServer) submit(ap asset.Asset_PutLogServer, p string) (retErr *er
 			return errors.New(err)
 		}
 		if ls, err = ap.Recv(); err != nil {
+			if err == io.EOF {
+				return nil
+			}
 			return errors.New(err)
 		}
 	}
 }
 
-func write(ag asset.Asset_GetLogServer, buf []byte) error {
-	return ag.Send(&asset.LogChunk{Chunk: buf})
+func write(ag assetsvc.GetLogServerStream, buf []byte) error {
+	return ag.Send(&assetsvc.GetLogResult{Chunk: buf})
 }
 
-func (as *AssetServer) attach(id int64, ag asset.Asset_GetLogServer, p string) (retErr error) {
+func (as *AssetServer) attach(id int64, ag assetsvc.GetLogServerStream, p string) (retErr error) {
 	defer func() {
 		if retErr != nil {
-			switch err := retErr.(type) {
-			case *errors.Error:
-				retErr = err.ToGRPC(codes.FailedPrecondition)
-			default:
-				retErr = errors.New(err).ToGRPC(codes.FailedPrecondition)
-			}
-
 		} else {
 			retErr = write(ag, []byte(color.New(color.FgGreen).Sprintln("---- LOG COMPLETE ----")))
 		}

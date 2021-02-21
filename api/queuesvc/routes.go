@@ -66,7 +66,7 @@ func (qs *QueueServer) NextQueueItem(ctx context.Context, qr *gtypes.QueueReques
 
 	if qi.Run.Task.Submission.BaseRef.Repository.Owner == nil {
 		err := errors.New("No owner for repository for queued run; skipping")
-		qs.H.Clients.Log.WithFields(log.FieldMap{
+		qs.H.Clients.Log.WithFields(log.Fields{
 			"repository": qi.Run.Task.Submission.BaseRef.Repository.Name,
 			"run_id":     fmt.Sprintf("%d", qi.Run.ID),
 			"ran_on":     qr.RunningOn,
@@ -127,7 +127,7 @@ func (qs *QueueServer) Submit(ctx context.Context, sub *queue.Submission) (*empt
 	}
 
 	submissionLogger := qs.H.Clients.Log.WithFields(
-		log.FieldMap{
+		log.Fields{
 			"parent": sub.Parent,
 			"fork":   sub.Fork,
 			"head":   sub.Headsha,

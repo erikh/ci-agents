@@ -96,7 +96,7 @@ func (h *Handler) doSubmit(w http.ResponseWriter, logger *log.SubLogger, obj int
 	if err != nil {
 		switch err := err.(type) {
 		case *ErrCancelPR:
-			logger.WithFields(log.FieldMap{"pull_request": fmt.Sprintf("%v", err.PRID), "repository": err.Repository}).Infof(context.Background(), "Canceling PR")
+			logger.WithFields(log.Fields{"pull_request": fmt.Sprintf("%v", err.PRID), "repository": err.Repository}).Infof(context.Background(), "Canceling PR")
 			if err := h.dataClient.CancelTasksByPR(context.Background(), err.Repository, err.PRID); err != nil {
 				return true
 			}
@@ -116,7 +116,7 @@ func (h *Handler) doSubmit(w http.ResponseWriter, logger *log.SubLogger, obj int
 			return
 		}
 
-		logger.WithFields(log.FieldMap{"submission": fmt.Sprintf("%#v", *sub)}).Infof(context.Background(), "Submission took %v", time.Since(now))
+		logger.WithFields(log.Fields{"submission": fmt.Sprintf("%#v", *sub)}).Infof(context.Background(), "Submission took %v", time.Since(now))
 	}()
 
 	return false
@@ -155,7 +155,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	event := req.Header.Get("X-GitHub-Event")
-	logger = logger.WithFields(log.FieldMap{"event": event})
+	logger = logger.WithFields(log.Fields{"event": event})
 	go func() { logger.Infof(context.Background(), "Full RTT for hook was %v", time.Since(since)) }()
 
 	if h.handleBasic(w, logger, event) {

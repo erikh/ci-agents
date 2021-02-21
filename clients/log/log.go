@@ -14,11 +14,10 @@ import (
 	"time"
 
 	transport "github.com/erikh/go-transport"
-	_struct "github.com/golang/protobuf/ptypes/struct"
-	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/sirupsen/logrus"
-	"github.com/tinyci/ci-agents/ci-gen/grpc/services/log"
 	"github.com/tinyci/ci-agents/errors"
+	"github.com/tinyci/ci-agents/gen/grpc/logsvc/client"
+	"github.com/tinyci/ci-agents/gen/logsvc"
 	"github.com/tinyci/ci-agents/model"
 	"github.com/tinyci/ci-agents/utils"
 	"google.golang.org/grpc"
@@ -26,18 +25,18 @@ import (
 
 // Client is a small wrapper around the GRPC client that includes tracing data.
 type Client struct {
-	client log.LogClient
+	conn   *grpc.ClientConn
 	closer io.Closer
 	closed bool
 }
 
 const (
 	// LevelDebug is the debug loglevel
-	LevelDebug = "DEBUG"
+	LevelDebug = "debug"
 	// LevelError is the error loglevel
-	LevelError = "ERROR"
+	LevelError = "error"
 	// LevelInfo is the info loglevel
-	LevelInfo = "INFO"
+	LevelInfo = "info"
 )
 
 // Close closes the client's tracing functionality
@@ -53,6 +52,10 @@ func (c *Client) Close() *errors.Error {
 	return nil
 }
 
+func (c *Client) goaClient() *client.Client {
+	return client.NewClient(c.conn)
+}
+
 var (
 	// RemoteClient is the swagger-based syslogsvc client.
 	RemoteClient *Client
@@ -60,46 +63,18 @@ var (
 	remoteMutex sync.Mutex
 )
 
-// FieldMap is just a type alias for map[string]string to keep me from
-// breaking my fingers.
-type FieldMap map[string]string
-
 // Fields is just shorthand for some protobuf stuff.
-type Fields _struct.Struct
+type Fields map[string]string
 
-func toValue(str string) *_struct.Value {
-	return &_struct.Value{Kind: &_struct.Value_StringValue{StringValue: str}}
-}
+// ToLogrus converts Fields to logrus.Fields
+func (f Fields) ToLogrus() logrus.Fields {
+	ret := logrus.Fields{}
 
-// NewFields creates a compatible *Fields
-func NewFields() *Fields {
-	return &Fields{Fields: map[string]*_struct.Value{}}
-}
-
-// ToFields converts a FieldMap to a *Fields
-func (f FieldMap) ToFields() *Fields {
-	fields := map[string]*_struct.Value{}
-
-	for k, v := range f {
-		fields[k] = toValue(v)
+	for key, value := range f {
+		ret[key] = value
 	}
 
-	return &Fields{Fields: fields}
-}
-
-// ToLogrus just casts stuff to make logrus happy
-func (f *Fields) ToLogrus() map[string]interface{} {
-	m := map[string]interface{}{}
-	for key, value := range f.Fields {
-		s, ok := value.Kind.(*_struct.Value_StringValue)
-		if ok {
-			m[key] = s.StringValue
-		} else {
-			m[key] = fmt.Sprintf("%v", value.Kind)
-		}
-	}
-
-	return m
+	return ret
 }
 
 // ConfigureRemote configures the remote endpoint with a provided URL.
@@ -120,70 +95,66 @@ func ConfigureRemote(addr string, cert *transport.Cert, trace bool) *errors.Erro
 		}
 	}
 
-	client, err := transport.GRPCDial(cert, addr, options...)
+	c, err := transport.GRPCDial(cert, addr, options...)
 	if err != nil {
 		return errors.New(err)
 	}
 
-	logClient := log.NewLogClient(client)
-
-	RemoteClient = &Client{client: logClient, closer: closer}
+	RemoteClient = &Client{conn: c, closer: closer}
 	return nil
 }
 
 // SubLogger is a handle to cached parameters for logging.
 type SubLogger struct {
 	Service string
-	Fields  *Fields
+	Fields  Fields
 }
 
 // New creates a new SubLogger which can be primed with cached values for each log entry.
 func New() *SubLogger {
-	return &SubLogger{Service: "n/a", Fields: &Fields{Fields: map[string]*_struct.Value{}}}
+	return &SubLogger{Service: "n/a", Fields: Fields{}}
 }
 
 // NewWithData returns a SubLogger already primed with cached data.
-func NewWithData(svc string, params FieldMap) *SubLogger {
+func NewWithData(svc string, params Fields) *SubLogger {
 	if params == nil {
-		params = FieldMap{}
+		params = Fields{}
 	}
 
-	p := params.ToFields()
-
-	p.Fields["service"] = toValue(svc)
-	return &SubLogger{svc, p}
+	params["service"] = svc
+	return &SubLogger{svc, params}
 }
 
 // WithService is a SubLogger version of package-level WithService. They call the same code.
 func (sub *SubLogger) WithService(svc string) *SubLogger {
 	sub2 := *sub
 	sub2.Service = svc
-	sub2.Fields = NewFields()
+	sub2.Fields = Fields{}
 
 	if sub.Fields != nil {
 		params := sub.Fields
 
-		for k, v := range params.Fields {
-			sub2.Fields.Fields[k] = toValue(v.String())
+		for k, v := range params {
+			sub2.Fields[k] = v
 		}
 	}
 
-	sub2.Fields.Fields["service"] = toValue(svc)
+	sub2.Fields["service"] = svc
 	return &sub2
 }
 
 // WithFields is a SubLogger version of package-level WithFields. They call the same code.
-func (sub *SubLogger) WithFields(params FieldMap) *SubLogger {
+func (sub *SubLogger) WithFields(params Fields) *SubLogger {
 	sub2 := *sub
 
-	sub2.Fields = NewFields()
+	sub2.Fields = Fields{}
 
-	for k, v := range sub.Fields.Fields {
-		sub2.Fields.Fields[k] = v
+	for k, v := range sub.Fields {
+		sub2.Fields[k] = v
 	}
 
-	for k, v := range params.ToFields().Fields {
-		sub2.Fields.Fields[k] = v
+	for k, v := range params {
+		sub2.Fields[k] = v
 	}
 
 	return &sub2
@@ -198,7 +169,7 @@ func (sub *SubLogger) WithRequest(req *http.Request) *SubLogger {
 		raddr = strings.TrimSpace(strings.SplitN(raddr, ",", 2)[0])
 	}
 
-	fm := FieldMap{
+	fm := Fields{
 		"remote_addr":    raddr,
 		"request_method": req.Method,
 		"request_url":    req.URL.String(),
@@ -209,7 +180,7 @@ func (sub *SubLogger) WithRequest(req *http.Request) *SubLogger {
 
 // WithUser includes user information
 func (sub *SubLogger) WithUser(user *model.User) *SubLogger {
-	fm := FieldMap{
+	fm := Fields{
 		"username": user.Username,
 		"user_id":  fmt.Sprintf("%v", user.ID),
 	}
@@ -217,19 +188,14 @@ func (sub *SubLogger) WithUser(user *model.User) *SubLogger {
 	return sub.WithFields(fm)
 }
 
-func (sub *SubLogger) makeMsg(level, msg string, values []interface{}) *log.LogMessage {
+func (sub *SubLogger) makeMsg(level, msg string, values []interface{}) *logsvc.PutPayload {
 	if values != nil {
 		msg = fmt.Sprintf(msg, values...)
 	}
 
-	now := time.Now()
-	ts := timestamp.Timestamp{}
-	ts.Seconds = now.Unix()
-	ts.Nanos = int32(now.Nanosecond())
-
-	return &log.LogMessage{
-		At:      &ts,
-		Fields:  (*_struct.Struct)(sub.Fields),
+	return &logsvc.PutPayload{
+		At:      time.Now().Unix(),
+		Fields:  sub.Fields,
 		Message: msg,
 		Level:   level,
 		Service: sub.Service,
@@ -240,9 +206,10 @@ func (sub *SubLogger) makeMsg(level, msg string, values []interface{}) *log.LogM
 func (sub *SubLogger) Logf(ctx context.Context, level string, msg string, values []interface{}, localLog func(string, ...interface{})) {
 	if RemoteClient != nil {
 		made := sub.makeMsg(level, msg, values)
-		if _, err := RemoteClient.client.Put(ctx, made, grpc.WaitForReady(true)); err != nil {
+
+		if _, err := RemoteClient.goaClient().Put()(ctx, made); err != nil {
 			localLog(err.Error())
-			localLog(made.String())
+			localLog("%v", made)
 			return
 		}
 	}
@@ -253,10 +220,25 @@ func (sub *SubLogger) Logf(ctx context.Context, level string, msg string, values
 // Log logs a thing
 func (sub *SubLogger) Log(ctx context.Context, level string, msg interface{}, localLog func(...interface{})) {
 	if RemoteClient != nil {
-		made := sub.makeMsg(level, fmt.Sprintf("%v", msg), nil)
-		if _, err := RemoteClient.client.Put(ctx, made, grpc.WaitForReady(true)); err != nil {
+		var made *logsvc.PutPayload
+
+		switch msg := msg.(type) {
+		case string:
+			made = sub.makeMsg(level, msg, nil)
+		case fmt.Stringer:
+			made = sub.makeMsg(level, msg.String(), nil)
+		case errors.Error:
+			made = sub.makeMsg(level, msg.Error(), nil)
+		case logsvc.PutPayload:
+			made = sub.makeMsg(level, msg.Message, nil)
+		default:
+			localLog(fmt.Sprintf("attempted to log an invalid value (%T); coerce to fmt.Stringer or error first", msg))
+			return
+		}
+
+		if _, err := RemoteClient.goaClient().Put()(ctx, made); err != nil {
 			localLog(err)
-			localLog(made.String())
+			localLog(made)
 			return
 		}
 	}
