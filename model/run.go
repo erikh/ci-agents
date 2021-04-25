@@ -8,11 +8,11 @@ import (
 
 	"errors"
 
-	"github.com/jinzhu/gorm"
 	gtypes "github.com/tinyci/ci-agents/ci-gen/grpc/types"
 	"github.com/tinyci/ci-agents/clients/github"
 	"github.com/tinyci/ci-agents/types"
 	"github.com/tinyci/ci-agents/utils"
+	"gorm.io/gorm"
 )
 
 // orchestration code for certain status operations.
@@ -267,7 +267,7 @@ func (m *Model) RunList(page, perPage int64, repository, sha string) ([]*Run, er
 		return nil, err
 	}
 
-	obj := m.Offset(page * perPage).Limit(perPage).Order("runs.id DESC")
+	obj := m.paginate(page, perPage).Order("runs.id DESC")
 
 	if repository != "" {
 		repo, err := m.GetRepositoryByName(repository)
@@ -300,8 +300,7 @@ func (m *Model) RunListForRepository(repo *Repository, ref *Ref, page, perPage i
 		return nil, err
 	}
 
-	obj := m.Offset(page * perPage).
-		Limit(perPage).
+	obj := m.paginate(page, perPage).
 		Order("runs.id DESC").
 		Joins("inner join tasks on tasks.id = runs.task_id").
 		Joins("inner join submissions on submissions.id = tasks.submission_id").

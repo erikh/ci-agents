@@ -7,11 +7,11 @@ import (
 
 	"errors"
 
-	"github.com/jinzhu/gorm"
 	gtypes "github.com/tinyci/ci-agents/ci-gen/grpc/types"
 	"github.com/tinyci/ci-agents/clients/github"
 	"github.com/tinyci/ci-agents/types"
 	"github.com/tinyci/ci-agents/utils"
+	"gorm.io/gorm"
 )
 
 // Task is the organizational unit of a single source-controlled directory. It
@@ -321,7 +321,7 @@ func (m *Model) ListTasks(repository, sha string, page, perPage int64) ([]*Task,
 
 	tasks := []*Task{}
 
-	dbErr := db.Limit(perPage).Offset(page * perPage).Find(&tasks).Error
+	dbErr := paginate(db, page, perPage).Find(&tasks).Error
 	if dbErr != nil {
 		return nil, dbErr
 	}

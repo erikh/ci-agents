@@ -42,7 +42,7 @@ func (ds *DataServer) AddSubscription(ctx context.Context, rus *data.RepoUserSel
 		return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
 	}
 
-	if err := ds.H.Model.AddSubscriptionsForUser(u, []*model.Repository{r}); err != nil {
+	if err := ds.H.Model.AddSubscriptionsForUser(u, model.RepositoryList{r}); err != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
 	}
 

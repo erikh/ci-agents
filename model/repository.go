@@ -10,9 +10,10 @@ import (
 
 	gh "github.com/google/go-github/github"
 	"github.com/gorilla/securecookie"
-	"github.com/jinzhu/gorm"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/types"
 	"github.com/tinyci/ci-agents/utils"
+	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 // RepositoryList conforms to the sort.Interface interface
@@ -45,17 +46,17 @@ func (rl RepositoryList) ToProto() *types.RepositoryList {
 
 // Repository is the encapsulation of a git repository.
 type Repository struct {
-	ID          int64  `gorm:"primary_key" json:"id"`
-	Name        string `gorm:"unique" json:"name"`
-	Private     bool   `json:"private"`
-	Disabled    bool   `json:"disabled"`
-	GithubJSON  []byte `gorm:"column:github" json:"-"`
-	OwnerID     int64  `json:"-"`
-	Owner       *User  `gorm:"association_autoupdate:false" json:"-"`
-	AutoCreated bool   `json:"auto_created"`
-	HookSecret  string `json:"-"`
+	ID          int64          `gorm:"primary_key" json:"id"`
+	Name        string         `gorm:"unique" json:"name"`
+	Private     bool           `json:"private"`
+	Disabled    bool           `json:"disabled"`
+	GithubJSON  datatypes.JSON `gorm:"column:github" json:"-"`
+	OwnerID     int64          `json:"-"`
+	Owner       *User          `gorm:"association_autoupdate:false" json:"-"`
+	AutoCreated bool           `json:"auto_created"`
+	HookSecret  string         `json:"-"`
 
-	Github *gh.Repository `json:"github"`
+	Github *gh.Repository `json:"github" gorm:"-"`
 }
 
 // NewRepositoryFromProto converts a proto repository to a model repository.

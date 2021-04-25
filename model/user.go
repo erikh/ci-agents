@@ -8,9 +8,9 @@ import (
 	"errors"
 
 	gh "github.com/google/go-github/github"
-	"github.com/jinzhu/gorm"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/types"
 	"github.com/tinyci/ci-agents/utils"
+	"gorm.io/gorm"
 
 	topTypes "github.com/tinyci/ci-agents/types"
 )
@@ -42,7 +42,7 @@ var (
 // UserError is the encapsulation of many errors that need to be presented to
 // the user.
 type UserError struct {
-	ID     int64  `gorm:"primary key" json:"id"`
+	ID     int64  `gorm:"primary_key" json:"id"`
 	UserID int64  `json:"-"`
 	Error  string `json:"error"`
 }
@@ -67,15 +67,15 @@ func (ue UserError) ToProto() *types.UserError {
 
 // User is a user record.
 type User struct {
-	ID               int64         `gorm:"primary_key" json:"id"`
+	ID               int64         `gorm:"primaryKey" json:"id"`
 	Username         string        `gorm:"unique" json:"username"`
 	LastScannedRepos *time.Time    `json:"last_scanned_repos,omitempty"`
-	Errors           []UserError   `json:"errors,omitempty"`
+	Errors           []*UserError  `json:"errors,omitempty"`
 	Subscribed       []*Repository `gorm:"many2many:subscriptions;preload:false" json:"subscribed,omitempty"`
 	LoginToken       []byte        `json:"-"`
 
 	TokenJSON []byte               `gorm:"column:token;not null" json:"-"`
-	Token     *topTypes.OAuthToken `json:"-"`
+	Token     *topTypes.OAuthToken `gorm:"-" json:"-"`
 }
 
 // SetToken sets the token's byte stream, and encrypts it.
@@ -98,11 +98,11 @@ func (u *User) FetchToken() error {
 
 // NewUserFromProto converts a proto user to a real user.
 func NewUserFromProto(u *types.User) (*User, error) {
-	errs := []UserError{}
+	errs := []*UserError{}
 
 	if len(u.Errors) != 0 {
 		for _, e := range u.Errors {
-			errs = append(errs, *NewUserErrorFromProto(e))
+			errs = append(errs, NewUserErrorFromProto(e))
 		}
 	}
 
@@ -184,7 +184,7 @@ func (m *Model) FindUserByID(id int64) (*User, error) {
 // FindUserByName finds a user by unique key username.
 func (m *Model) FindUserByName(username string) (*User, error) {
 	u := &User{}
-	return u, m.WrapError(m.Where("username = ?", username).First(u), "finding user by name")
+	return u, m.DB.Model(u).Where("username = ?", username).First(u).Error
 }
 
 // FindUserByNameWithSubscriptions finds a user by unique key username. It also fetches the subscriptions for the user.
@@ -203,18 +203,18 @@ func (m *Model) DeleteError(u *User, id int64) error {
 
 // AddSubscriptionsForUser adds the repositories to the subscriptions table. Access is
 // validated at the API level, not here.
-func (m *Model) AddSubscriptionsForUser(u *User, repos []*Repository) error {
-	return m.Model(u).Association("Subscribed").Append(repos).Error
+func (m *Model) AddSubscriptionsForUser(u *User, repos RepositoryList) error {
+	return m.Model(u).Association("Subscribed").Append(repos)
 }
 
 // RemoveSubscriptionForUser removes an item from the subscriptions table.
 func (m *Model) RemoveSubscriptionForUser(u *User, repo *Repository) error {
-	return m.Model(u).Association("Subscribed").Delete(repo).Error
+	return m.Model(u).Association("Subscribed").Delete(repo)
 }
 
 // AddError adds an error to the error list.
 func (u *User) AddError(err error) {
-	u.Errors = append(u.Errors, UserError{Error: err.Error()})
+	u.Errors = append(u.Errors, &UserError{Error: err.Error()})
 }
 
 // AfterFind is a gorm hook to unmarshal the Token JSON after finding the record.
@@ -305,7 +305,7 @@ func (m *Model) SaveRepositories(repos []*gh.Repository, username string, autoCr
 // for the user.
 func (m *Model) ListSubscribedTasksForUser(userID, page, perPage int64) ([]*Task, error) {
 	tasks := []*Task{}
-	call := m.Limit(perPage).Offset(page*perPage).
+	call := m.paginate(page, perPage).
 		Joins("inner join submissions on submissions.id = tasks.submission_id").
 		Joins("inner join refs on refs.id = submissions.base_ref_id or refs.id = submissions.head_ref_id").
 		Joins("inner join subscriptions on subscriptions.repository_id = refs.repository_id").

@@ -14,7 +14,7 @@ var OAuthExpiration = 10 * time.Minute
 
 // OAuth schema is for checking state return values from github.
 type OAuth struct {
-	State     string    `gorm:"primary key" json:"state"`
+	State     string    `gorm:"primary_key" json:"state"`
 	Scopes    string    `json:"scopes"`
 	ExpiresOn time.Time `json:"expires_on"`
 }

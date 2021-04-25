@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	sgin "github.com/gin-contrib/sessions"
 	"github.com/gorilla/securecookie"
 	"github.com/gorilla/sessions"
 	"github.com/pkg/errors"
@@ -112,17 +111,6 @@ func (sm *SessionManager) Save(r *http.Request, w http.ResponseWriter, s *sessio
 		http.SetCookie(w, sessions.NewCookie(s.Name(), encoded, s.Options))
 	}
 	return nil
-}
-
-// Options sets the options for the session handler.
-func (sm *SessionManager) Options(options sgin.Options) {
-	sm.options = &sessions.Options{
-		Path:     options.Path,
-		Domain:   options.Domain,
-		MaxAge:   options.MaxAge,
-		Secure:   options.Secure,
-		HttpOnly: options.HttpOnly,
-	}
 }
 
 // SaveSession saves the provided session with the codecs used.

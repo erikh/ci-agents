@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/tinyci/ci-agents/clients/github"
@@ -358,42 +357,10 @@ func (h *H) findUser(ctx echo.Context) (*model.User, error) {
 
 // GetClient returns a github client that works with the credentials in the given context.
 func (h *H) getClient(ctx echo.Context) (github.Client, error) {
-	user, err := h.getGithub(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return h.Config.OAuth.GithubClient(user.Token.Username, user.Token.Token), nil
-}
-
-// GetGithub gets the github user from the session and loads it.
-func (h *H) getGithub(ctx echo.Context) (u *model.User, outErr error) {
-	sess, ok := h.getSession(ctx)
+	user, ok := h.getUser(ctx)
 	if !ok {
 		return nil, utils.ErrInvalidAuth
 	}
 
-	defer func() {
-		if outErr != nil {
-			if sess != nil {
-				sess.Values = map[interface{}]interface{}{}
-				sess.Save(ctx.Request(), ctx.Response())
-			}
-		}
-	}()
-
-	reqCtx := ctx.Request().Context()
-
-	uname, ok := sess.Values[SessionUsername].(string)
-	if ok && strings.TrimSpace(uname) != "" {
-		// no error, we're already logged in
-		return h.clients.Data.GetUser(reqCtx, uname)
-	}
-
-	token := ctx.Request().Header.Get("Authorization")
-	if token != "" {
-		return h.clients.Data.ValidateToken(reqCtx, token)
-	}
-
-	return nil, errInvalidCookie
+	return h.Config.OAuth.GithubClient(user.Token.Username, user.Token.Token), nil
 }

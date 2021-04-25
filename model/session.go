@@ -34,7 +34,7 @@ func (s *Session) ToProto() *types.Session {
 // LoadSession loads a session based on the key and returns it to the client
 func (m *Model) LoadSession(id string) (*Session, error) {
 	s := &Session{}
-	return s, m.WrapError(m.Limit(1).Where("key = ? and expires_on > now()", id).First(s), "loading session")
+	return s, m.WrapError(m.Model(s).Limit(1).Where("key = ? and expires_on > now()", id).First(s), "loading session")
 }
 
 // SaveSession does the opposite of LoadSession

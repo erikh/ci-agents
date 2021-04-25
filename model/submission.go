@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jinzhu/gorm"
 	gtypes "github.com/tinyci/ci-agents/ci-gen/grpc/types"
 	"github.com/tinyci/ci-agents/clients/github"
 	"github.com/tinyci/ci-agents/types"
 	"github.com/tinyci/ci-agents/utils"
+	"gorm.io/gorm"
 )
 
 // Submission is the concrete type for a test submission, unlike
@@ -16,7 +16,7 @@ import (
 // Each submission has it own ID and list of tasks so that we can further give
 // the user the opportunity to aggregate their tasks into a single unit.
 type Submission struct {
-	ID int64 `gorm:"priamry_key" json:"id"`
+	ID int64 `gorm:"primary_key" json:"id"`
 
 	User   *User `gorm:"association_autoupdate:false,nullable:true" json:"user"`
 	UserID int64 `json:"-"`
@@ -189,7 +189,7 @@ func (m *Model) SubmissionList(page, perPage int64, repository, sha string) ([]*
 		return nil, err
 	}
 
-	obj = obj.Offset(page * perPage).Limit(perPage)
+	obj = paginate(obj, page, perPage)
 	if err := m.WrapError(obj.Find(&subs), "listing submissions"); err != nil {
 		return nil, err
 	}
@@ -406,7 +406,7 @@ func (m *Model) SubmissionListForRepository(repo, sha string, page, perPage int6
 		return nil, err
 	}
 
-	obj = obj.Offset(page * perPage).Limit(perPage)
+	obj = paginate(obj, page, perPage)
 	if err := m.WrapError(obj.Find(&subs), "listing submissions for repository"); err != nil {
 		return nil, err
 	}
@@ -431,7 +431,7 @@ func (m *Model) submissionRunsQuery(sub *Submission) *gorm.DB {
 func (m *Model) TasksForSubmission(sub *Submission, page, perPage int64) ([]*Task, error) {
 	tasks := []*Task{}
 
-	obj := m.submissionTasksQuery(sub).Offset(page * perPage).Limit(perPage)
+	obj := paginate(m.submissionTasksQuery(sub), page, perPage)
 	if err := m.WrapError(obj.Find(&tasks), "listing tasks for a submission"); err != nil {
 		return nil, err
 	}
@@ -443,7 +443,7 @@ func (m *Model) TasksForSubmission(sub *Submission, page, perPage int64) ([]*Tas
 func (m *Model) RunsForSubmission(sub *Submission, page, perPage int64) ([]*Run, error) {
 	runs := []*Run{}
 
-	obj := m.submissionRunsQuery(sub).Offset(page * perPage).Limit(perPage)
+	obj := paginate(m.submissionRunsQuery(sub), page, perPage)
 	if err := m.WrapError(obj.Find(&runs), "listing runs for a submission"); err != nil {
 		return nil, err
 	}

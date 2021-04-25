@@ -7,9 +7,10 @@ import (
 	"time"
 
 	check "github.com/erikh/check"
-	"github.com/jinzhu/gorm"
 	"github.com/tinyci/ci-agents/types"
 	"github.com/tinyci/ci-agents/utils"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 var (
@@ -26,9 +27,8 @@ func init() {
 
 // WipeDB wipes all tables with `truncate table`.
 func WipeDB(c *check.C) {
-	m, err := gorm.Open("postgres", TestDBConfig)
+	m, err := gorm.Open(postgres.Open(TestDBConfig))
 	c.Assert(err, check.IsNil)
-	defer m.Close()
 
 	rows, err := m.Raw("select tablename from pg_catalog.pg_tables where schemaname='public'").Rows()
 	c.Assert(err, check.IsNil)

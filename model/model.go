@@ -1,11 +1,12 @@
 package model
 
 import (
+	"fmt"
 	"os"
 
-	"github.com/jinzhu/gorm"
-	_ "github.com/jinzhu/gorm/dialects/postgres" // pg support for gorm
 	"github.com/tinyci/ci-agents/utils"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 // Model is the outer layer of our internal database model, which will
@@ -16,7 +17,7 @@ type Model struct {
 
 // New returns the model structure after the db connection work has taken place.
 func New(sqlURL string) (*Model, error) {
-	db, err := gorm.Open("postgres", sqlURL)
+	db, err := gorm.Open(postgres.Open(sqlURL))
 	if err != nil {
 		return nil, err
 	}
@@ -25,13 +26,16 @@ func New(sqlURL string) (*Model, error) {
 
 	if os.Getenv("SQL_DEBUG") != "" {
 		db = db.Debug()
-	} else {
-		// this mutes it in test runs, where it's on by default I guess?! Very
-		// noisy.
-		db = db.LogMode(false)
+		// } else {
+		// 	// this mutes it in test runs, where it's on by default I guess?! Very
+		// 	// noisy.
+		// 	db = db.LogMode(false)
 	}
 
-	sqlDB := db.DB()
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
 	sqlDB.SetConnMaxIdleTime(-1)
 	sqlDB.SetConnMaxLifetime(-1)
 	sqlDB.SetMaxIdleConns(10)
@@ -46,9 +50,18 @@ var errorMapping = map[string]error{
 
 // SetConnPoolSize sets the connection pool size
 func (m *Model) SetConnPoolSize(size int) {
-	sqlDB := m.DB.DB()
+	sqlDB, _ := m.DB.DB()
 	sqlDB.SetMaxIdleConns(size)
 	sqlDB.SetMaxOpenConns(size)
+}
+
+// paginate is shorthand for limit+offset GORM code.
+func paginate(db *gorm.DB, page, perPage int64) *gorm.DB {
+	return db.Offset(int(page * perPage)).Limit(int(perPage))
+}
+
+func (m *Model) paginate(page, perPage int64) *gorm.DB {
+	return paginate(m.DB, page, perPage)
 }
 
 // MapError finds an error by string and returns an appropriate Error for it.
@@ -75,6 +88,8 @@ func (m *Model) WrapError(call *gorm.DB, msg string) error {
 	if call.Error == nil {
 		return nil
 	}
+
+	fmt.Println(call.Error)
 
 	return utils.WrapError(MapError(call.Error), "%v", msg)
 }

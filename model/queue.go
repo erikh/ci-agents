@@ -5,9 +5,9 @@ import (
 
 	"errors"
 
-	"github.com/jinzhu/gorm"
 	"github.com/tinyci/ci-agents/ci-gen/grpc/types"
 	"github.com/tinyci/ci-agents/utils"
+	"gorm.io/gorm"
 )
 
 // QueueItem represents an item in the queue table in the database.
@@ -184,7 +184,7 @@ func (m *Model) QueueList(page, perPage int64) ([]*QueueItem, error) {
 		return nil, err
 	}
 
-	return qis, m.WrapError(m.Offset(page*perPage).Limit(perPage).Order("id DESC").Find(&qis), "listing queue")
+	return qis, m.WrapError(m.paginate(page, perPage).Order("id DESC").Find(&qis), "listing queue")
 }
 
 // QueueListForRepository returns a list of queue items with pagination.
@@ -197,8 +197,7 @@ func (m *Model) QueueListForRepository(repo *Repository, page, perPage int64) ([
 	}
 
 	return qis, m.WrapError(
-		m.Offset(page*perPage).
-			Limit(perPage).
+		m.paginate(page, perPage).
 			Order("id DESC").
 			Joins("inner join runs on run_id = runs.id").
 			Joins("inner join tasks on runs.task_id = tasks.id").
