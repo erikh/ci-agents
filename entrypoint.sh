@@ -2,7 +2,7 @@
 
 set -e
 
-POSTGRES_VERSION=11
+POSTGRES_VERSION=12
 
 cat welcome.ans
 
@@ -25,8 +25,10 @@ then
     chown postgres:postgres /var/lib/postgresql/${POSTGRES_VERSION}/main
     su postgres -c "/usr/lib/postgresql/${POSTGRES_VERSION}/bin/initdb -D /var/lib/postgresql/${POSTGRES_VERSION}/main"
 
-    echo shared_buffers=1GB >> /etc/postgresql/${POSTGRES_VERSION}/main/postgresql.conf
-    echo max_connections=200 >> /etc/postgresql/${POSTGRES_VERSION}/main/postgresql.conf
+    config=/etc/postgresql/${POSTGRES_VERSION}/main/postgresql.conf
+
+    grep -iv shared_buffers ${config} >${config}.tmp && mv ${config}.tmp ${config}
+    echo shared_buffers=2GB >> ${config}
 
     service postgresql start
 
