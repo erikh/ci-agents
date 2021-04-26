@@ -172,7 +172,7 @@ func (u *User) ToProto() *types.User {
 // CreateUser initializes a user struct and writes it to the db.
 func (m *Model) CreateUser(username string, token *topTypes.OAuthToken) (*User, error) {
 	u := &User{Username: username, Token: token}
-	return u, m.WrapError(m.Create(u), "creating user")
+	return u, m.DB.Model(u).Create(u).Error
 }
 
 // FindUserByID finds the user by integer ID.

@@ -39,7 +39,7 @@ type Run struct {
 	TaskID     int64      `json:"-"`
 	RanOn      *string    `json:"ran_on"`
 
-	RunSettings *types.RunSettings `json:"settings"`
+	RunSettings *types.RunSettings `gorm:"-" json:"settings"`
 }
 
 // NewRunFromProto yields a new run from a protobuf message.
@@ -121,6 +121,10 @@ func (r *Run) Validate() error {
 // AfterFind validates the output from the database before releasing it to the
 // hook chain
 func (r *Run) AfterFind(tx *gorm.DB) error {
+	if err := preload(tx).Error; err != nil {
+		return err
+	}
+
 	if err := json.Unmarshal(r.RunSettingsJSON, &r.RunSettings); err != nil {
 		return utils.WrapError(err, "unpacking task settings for task %d", r.ID)
 	}

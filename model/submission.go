@@ -136,6 +136,15 @@ func NewSubmissionFromProto(gt *gtypes.Submission) (*Submission, error) {
 	}, nil
 }
 
+// AfterFind is a gorm hook for after finding.
+func (s *Submission) AfterFind(tx *gorm.DB) error {
+	if err := preload(tx).Error; err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // NewSubmissionFromMessage creates a blank record populated by the appropriate data
 // reaped from the message type in types/submission.go.
 func (m *Model) NewSubmissionFromMessage(sub *types.Submission) (*Submission, error) {

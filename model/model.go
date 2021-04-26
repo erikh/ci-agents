@@ -7,6 +7,7 @@ import (
 	"github.com/tinyci/ci-agents/utils"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Model is the outer layer of our internal database model, which will
@@ -17,19 +18,17 @@ type Model struct {
 
 // New returns the model structure after the db connection work has taken place.
 func New(sqlURL string) (*Model, error) {
-	db, err := gorm.Open(postgres.Open(sqlURL))
+	db, err := gorm.Open(postgres.Open(sqlURL), &gorm.Config{
+		Logger:               nil, // FIXME mute this
+		PrepareStmt:          true,
+		FullSaveAssociations: false,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	db = db.Set("gorm:auto_preload", true)
-
 	if os.Getenv("SQL_DEBUG") != "" {
 		db = db.Debug()
-		// } else {
-		// 	// this mutes it in test runs, where it's on by default I guess?! Very
-		// 	// noisy.
-		// 	db = db.LogMode(false)
 	}
 
 	sqlDB, err := db.DB()
@@ -53,6 +52,10 @@ func (m *Model) SetConnPoolSize(size int) {
 	sqlDB, _ := m.DB.DB()
 	sqlDB.SetMaxIdleConns(size)
 	sqlDB.SetMaxOpenConns(size)
+}
+
+func preload(tx *gorm.DB) *gorm.DB {
+	return tx.Statement.Preload(clause.Associations)
 }
 
 // paginate is shorthand for limit+offset GORM code.

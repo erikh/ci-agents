@@ -65,6 +65,10 @@ func (qi *QueueItem) ToProto() *types.QueueItem {
 // AfterFind validates the output from the database before releasing it to the
 // hook chain
 func (qi *QueueItem) AfterFind(tx *gorm.DB) error {
+	if err := preload(tx).Error; err != nil {
+		return err
+	}
+
 	if err := qi.Validate(); err != nil {
 		return utils.WrapError(err, "reading queue item %d", qi.ID)
 	}
@@ -142,8 +146,7 @@ func (m *Model) NextQueueItem(runningOn string, queueName string) (*QueueItem, e
 	qi := &QueueItem{}
 
 	err := m.WrapError(
-		db.Preload("Run.Task").
-			Order("id").
+		db.Order("id").
 			Where("queue_name = ? and not running", queueName).
 			First(qi),
 		"getting task owners during queue next",

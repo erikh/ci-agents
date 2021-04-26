@@ -156,6 +156,10 @@ func (ms *modelSuite) CreateRun() (*Run, error) {
 		Submission:   sub,
 	}
 
+	if err := ms.model.Create(task).Error; err != nil {
+		return nil, err
+	}
+
 	run := &Run{
 		Name:        runName,
 		RunSettings: ts.Runs[runName],

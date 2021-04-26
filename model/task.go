@@ -30,12 +30,12 @@ type Task struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	Status     *bool      `json:"status,omitempty"`
 
-	TaskSettings *types.TaskSettings `json:"settings"`
+	TaskSettings *types.TaskSettings `gorm:"-" json:"settings"`
 
 	Runs int64 `json:"runs" gorm:"-"`
 
-	Submission   *Submission `gorm:"association_autoupdate:false" json:"submission"`
 	SubmissionID int64       `json:"-"`
+	Submission   *Submission `gorm:"association_autoupdate:false" json:"submission"`
 }
 
 // NewTaskFromProto converts the proto representation to the task type.
@@ -108,6 +108,10 @@ func (t *Task) Validate() error {
 // AfterFind validates the output from the database before releasing it to the
 // hook chain
 func (t *Task) AfterFind(tx *gorm.DB) error {
+	if err := preload(tx).Error; err != nil {
+		return err
+	}
+
 	if err := json.Unmarshal(t.TaskSettingsJSON, &t.TaskSettings); err != nil {
 		return utils.WrapError(err, "unpacking task settings for task %d", t.ID)
 	}
